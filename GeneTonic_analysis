@@ -9,7 +9,7 @@ library(plotly)
 library(igraph)
 
 
-setwd("C:/Projects/Esmaeel_RNAseq_Jul2023/results/")
+setwd("<working_dir>")
 list.files()
 
 # Load DESeq2 object corresponding to pairwise comparison

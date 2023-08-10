@@ -1,0 +1,145 @@
+library(GeneTonic)
+library(topGO)
+library(pcaExplorer)
+library(org.Rn.eg.db)
+library(DESeq2)
+library(ggplot2)
+library(clusterProfiler)
+library(plotly)
+library(igraph)
+
+
+setwd("C:/Projects/Esmaeel_RNAseq_Jul2023/results/")
+list.files()
+
+# Load DESeq2 object corresponding to pairwise comparison
+load("HGHL_vs_CT_PSI/HGHL_vs_CT_PSI_diff.RData")
+dds_diff
+
+# Load the results of DESeq2 comparison
+res <- read.csv("HGHL_vs_CT_PSI/HGHL_vs_CT_PSI_results.csv", header = T)
+head(res)
+
+# Select ids of differentially expressed genes
+degs <- subset(res, padj < 0.05 )$rgd_symbol
+degs <- degs[!degs == ""]
+degs
+
+# Get background ids
+bg_ids <- res$rgd_symbol
+bg_ids <- bg_ids[!bg_ids == ""]
+bg_ids
+
+# Detect enriched GO terms using topGO
+topgoDE <-
+  pcaExplorer::topGOtable(degs,
+                          bg_ids,
+                          ontology = "BP",
+                          mapping = "org.Rn.eg.db",
+                          geneID = "symbol",
+                          topTablerows = 500)
+
+head(topgoDE, 2)
+write.csv(topgoDE, "HGHL_vs_CT_PSI_topGO_BP.csv", row.names = F)
+
+# Convert enrichment results to GeneTonic compatible format
+res_enrich <- shake_topGOtableResult(topgoDE)
+
+# Remove Biological process category as too general
+res_enrich <- 
+  res_enrich[-which(res_enrich$gs_description == "biological_process"),]
+
+# Get annotation data object for ID conversion
+anno_df <- data.frame(
+  gene_id = rownames(dds_diff),
+  gene_name = mapIds(org.Rn.eg.db, keys = rownames(dds_diff), 
+                     column = "SYMBOL", keytype = "ENSEMBL"),
+  stringsAsFactors = FALSE,
+  row.names = rownames(dds_diff)
+)
+head(anno_df)
+
+# Generate interactive app to explore the data
+# I don't see any way to save the app at the moment
+if (interactive()) {
+  GeneTonic(dds = dds_diff,
+            res_de = DESeq2::results(dds_diff, 
+                                     contrast=c("Group", "HGHL", "CT")),
+            res_enrich = res_enrich,
+            annotation_obj = anno_df,
+            project_id = "HGHL_vs_CT_GOenrich")
+}
+
+# Produce GeneTonic plots
+# Build alluvial plot
+alluv_plot <- gs_alluvial(res_enrich = res_enrich,
+                   res_de = DESeq2::results(dds_diff, 
+                                     contrast=c("Group", "HGHL", "CT")),
+                   annotation_obj = anno_df,
+                   n_gs = 10)
+alluv_plot
+plotly::export(p = alluv_plot, #the graph to export
+                  file = "HGHL_vs_CT_PSI_top10_alluvial.pdf",
+               vwidth = 2000, vheight = 2000)
+
+
+# Build gene-gene_set network for top 20 GO terms
+ggs <- ggs_graph(res_enrich = res_enrich,
+                 res_de = DESeq2::results(dds_diff, 
+                                          contrast=c("Group", "HGHL", "CT_PSI")),
+                 anno_df,
+                 n_gs = 20)
+
+# Calculate aggregated scores
+res_enrich_agg <- 
+  get_aggrscores(res_enrich = res_enrich,
+                 res_de = DESeq2::results(dds_diff, 
+                              contrast=c("Group", "HGHL", "CT_PSI")),
+                 annotation_obj = anno_df,
+                 aggrfun = mean)
+
+
+# Cluster enriched GO terms
+pdf("HGHL_vs_CT_PSI_top50_dendro.pdf", width = 6, height = 8)
+gs_dendro(res_enrich_agg,
+             n_gs = 50,
+             gs_dist_type = "kappa", 
+             clust_method = "ward.D2",
+             color_leaves_by = NULL,
+             size_leaves_by = NULL,
+             color_branches_by = "clusters",
+             create_plot = TRUE)
+dev.off()
+
+# Dotplot of top enriched GO terms
+# Z-score shows direction of change
+pdf("HGHL_vs_CT_PSI_top30_lollipop.pdf", width = 10, height = 8)
+gs_summary_overview(res_enrich_agg,
+                    n_gs = 30,
+                    p_value_column = "gs_pvalue",
+                    color_by = "z_score")
+dev.off()
+
+# Plot summary heatmap, top 15 by elimination p-value from topGO
+pdf("HGHL_vs_CT_PSI_top15_summary_heatmap.pdf", width = 28, height = 5)
+gs_summary_heat(res_enrich,
+                res_de = DESeq2::results(dds_diff, 
+                                         contrast=c("Group", "HGHL", "CT_PSI")),
+                anno_df,
+                n_gs = 15)
+dev.off()
+
+# Plot heatmap of gene set scores for top 30 GO categories
+vst_diff <- vst(dds_diff)
+scores_mat <- gs_scores(
+  se = vst_diff,
+  res_de = DESeq2::results(dds_diff, 
+                           contrast=c("Group", "HGHL", "CT_PSI")),
+  res_enrich = res_enrich,
+  annotation_obj = anno_df
+)
+
+pdf("HGHL_vs_CT_PSI_top50_gene_score_heatmap.pdf", width = 12, height = 10)
+gs_scoresheat(scores_mat,
+              n_gs = 50)
+dev.off()

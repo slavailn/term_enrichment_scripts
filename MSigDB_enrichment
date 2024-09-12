@@ -1,0 +1,32 @@
+library(clusterProfiler)
+library(msigdbr)
+library(dplyr)
+
+# Calculate gene enrichment relative to MigSigDB signatures
+setwd(<wd>)
+list.files()
+
+# Retrieve human sets
+m_df <- msigdbr(species = "Homo sapiens")
+head(m_df, 2) %>% as.data.frame
+
+# Select C7 - immunologic signature gene sets
+m_t2g <- msigdbr(species = "Homo sapiens", category = "C7") %>%
+  dplyr::select(gs_name, entrez_gene)
+head(m_t2g)
+
+# Gene gene list
+wfisher_res <- read.csv("meta_analysis_results/meta_analysis_wfisher.csv", 
+                        header = T)
+wfisher_down <- subset(wfisher_res, pvalue < 0.01 & effect_size_dir == '-')
+dim(wfisher_down)
+head(wfisher_down)
+
+genes_down <- as.character(wfisher_down$entrezID)
+# Run over-representation analysis
+em <- enricher(genes_down, TERM2GENE = m_t2g)
+em <- em@result
+head(em)
+sum(em$qvalue < 0.01)
+write.csv(em, file = "MSIGDB_C7_Immunological_DOWN_enrichment.csv", 
+          row.names = F)
